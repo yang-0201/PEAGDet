@@ -10,14 +10,14 @@
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
 #path: C:\Users\Yang\Downloads\train # dataset root dir
 train:
-#  - E:\ComfyUI-aki(1)\ComfyUI-aki-v1.6\ComfyUI\output\add_flux_fill_qiyuan_last_64_old\images # train images (relative to 'path') 118287 images
-#  - E:\ComfyUI-aki(1)\ComfyUI-aki-v1.6\ComfyUI\output\add_flux_fill_qiyuan_last_64\images # train images (relative to 'path') 118287 images
-#  - C:\Users\Yang\Documents\WeChat Files\wxid_vidhq7gfm62p22\FileStorage\File\2025-07\content/all/images
-#  - C:\Users\Yang\Documents\WeChat Files\wxid_vidhq7gfm62p22\FileStorage\File\2025-07\content/all_v3/images
-  - C:\Users\Yang\Downloads\train1/images  # val images (relative to 'path') 5000 images
+  #  - E:\ComfyUI-aki(1)\ComfyUI-aki-v1.6\ComfyUI\output\add_flux_fill_qiyuan_last_64_old\images # train images (relative to 'path') 118287 images
+  #  - E:\ComfyUI-aki(1)\ComfyUI-aki-v1.6\ComfyUI\output\add_flux_fill_qiyuan_last_64\images # train images (relative to 'path') 118287 images
+  #  - C:\Users\Yang\Documents\WeChat Files\wxid_vidhq7gfm62p22\FileStorage\File\2025-07\content/all/images
+  #  - C:\Users\Yang\Documents\WeChat Files\wxid_vidhq7gfm62p22\FileStorage\File\2025-07\content/all_v3/images
+  - C:\Users\Yang\Downloads\train1/images # val images (relative to 'path') 5000 images
 
 val:
-  - C:\Users\Yang\Downloads\train/images  # val images (relative to 'path') 5000 images
+  - C:\Users\Yang\Downloads\train/images # val images (relative to 'path') 5000 images
 #  - images/val_dual\0_V_transparent # train images (relative to 'path') 118287 images
 
 test: images/test # val images (relative to 'path') 5000 images
@@ -53,7 +53,3 @@ names:
   25: storage_tank
   26: warehouse
   27: workshop
-
-
-
-
