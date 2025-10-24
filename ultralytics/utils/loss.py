@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -122,7 +122,7 @@ class BboxLoss(nn.Module):
         target_scores: torch.Tensor,
         target_scores_sum: torch.Tensor,
         fg_mask: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for bounding boxes."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
@@ -155,7 +155,7 @@ class RotatedBboxLoss(BboxLoss):
         target_scores: torch.Tensor,
         target_scores_sum: torch.Tensor,
         fg_mask: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute IoU and DFL losses for rotated bounding boxes."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         iou = probiou(pred_bboxes[fg_mask], target_bboxes[fg_mask])
@@ -240,7 +240,7 @@ class v8DetectionLoss:
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
         feats = preds[1] if isinstance(preds, tuple) else preds
@@ -295,6 +295,7 @@ class v8DetectionLoss:
         loss[2] *= self.hyp.dfl  # dfl gain
 
         return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
+
 
 class v8DetectionLoss_Aux:
     """Criterion class for computing training losses for YOLOv8 object detection."""
@@ -348,7 +349,7 @@ class v8DetectionLoss_Aux:
             # pred_dist = (pred_dist.view(b, a, c // 4, 4).softmax(2) * self.proj.type(pred_dist.dtype).view(1, 1, -1, 1)).sum(2)
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
         loss_aux = torch.zeros(3, device=self.device)  # box, cls, dfl
@@ -359,9 +360,9 @@ class v8DetectionLoss_Aux:
             (self.reg_max * 4, self.nc), 1
         )
         feats_aux = preds_aux
-        pred_distri_aux, pred_scores_aux = torch.cat([xi.view(feats_aux[0].shape[0], self.no, -1) for xi in feats_aux], 2).split(
-            (self.reg_max * 4, self.nc), 1
-        )
+        pred_distri_aux, pred_scores_aux = torch.cat(
+            [xi.view(feats_aux[0].shape[0], self.no, -1) for xi in feats_aux], 2
+        ).split((self.reg_max * 4, self.nc), 1)
 
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
@@ -408,7 +409,6 @@ class v8DetectionLoss_Aux:
         target_scores_sum = max(target_scores.sum(), 1)
         target_scores_sum_aux = max(target_scores_aux.sum(), 1)
 
-
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
@@ -423,7 +423,13 @@ class v8DetectionLoss_Aux:
         if fg_mask_aux.sum():
             target_bboxes_aux /= stride_tensor
             loss_aux[0], loss_aux[2] = self.bbox_loss_aux(
-                pred_distri_aux, pred_bboxes_aux, anchor_points, target_bboxes_aux, target_scores_aux, target_scores_sum_aux, fg_mask_aux
+                pred_distri_aux,
+                pred_bboxes_aux,
+                anchor_points,
+                target_bboxes_aux,
+                target_scores_aux,
+                target_scores_sum_aux,
+                fg_mask_aux,
             )
 
         loss[0] *= self.hyp.box  # box gain
@@ -447,7 +453,7 @@ class v8SegmentationLoss(v8DetectionLoss):
         super().__init__(model)
         self.overlap = model.args.overlap_mask
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the combined loss for detection and segmentation."""
         loss = torch.zeros(4, device=self.device)  # box, seg, cls, dfl
         feats, pred_masks, proto = preds if len(preds) == 3 else preds[1]
@@ -635,7 +641,7 @@ class v8PoseLoss(v8DetectionLoss):
         sigmas = torch.from_numpy(OKS_SIGMA).to(self.device) if is_pose else torch.ones(nkpt, device=self.device) / nkpt
         self.keypoint_loss = KeypointLoss(sigmas=sigmas)
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the total loss and detach it for pose estimation."""
         loss = torch.zeros(5, device=self.device)  # box, cls, dfl, kpt_location, kpt_visibility
         feats, pred_kpts = preds if isinstance(preds[0], list) else preds[1]
@@ -719,7 +725,7 @@ class v8PoseLoss(v8DetectionLoss):
         stride_tensor: torch.Tensor,
         target_bboxes: torch.Tensor,
         pred_kpts: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Calculate the keypoints loss for the model.
 
@@ -787,7 +793,7 @@ class v8PoseLoss(v8DetectionLoss):
 class v8ClassificationLoss:
     """Criterion class for computing training losses for classification."""
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the classification loss between predictions and true labels."""
         preds = preds[1] if isinstance(preds, (list, tuple)) else preds
         loss = F.cross_entropy(preds, batch["cls"], reduction="mean")
@@ -820,7 +826,7 @@ class v8OBBLoss(v8DetectionLoss):
                     out[j, :n] = torch.cat([targets[matches, 1:2], bboxes], dim=-1)
         return out
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate and return the loss for oriented bounding box detection."""
         loss = torch.zeros(3, device=self.device)  # box, cls, dfl
         feats, pred_angle = preds if isinstance(preds[0], list) else preds[1]
@@ -920,7 +926,7 @@ class E2EDetectLoss:
         self.one2many = v8DetectionLoss(model, tal_topk=10)
         self.one2one = v8DetectionLoss(model, tal_topk=1)
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         preds = preds[1] if isinstance(preds, tuple) else preds
         one2many = preds["one2many"]
@@ -941,7 +947,7 @@ class TVPDetectLoss:
         self.ori_no = self.vp_criterion.no
         self.ori_reg_max = self.vp_criterion.reg_max
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for text-visual prompt detection."""
         feats = preds[1] if isinstance(preds, tuple) else preds
         assert self.ori_reg_max == self.vp_criterion.reg_max  # TODO: remove it
@@ -955,7 +961,7 @@ class TVPDetectLoss:
         box_loss = vp_loss[0][1]
         return box_loss, vp_loss[1]
 
-    def _get_vp_features(self, feats: List[torch.Tensor]) -> List[torch.Tensor]:
+    def _get_vp_features(self, feats: list[torch.Tensor]) -> list[torch.Tensor]:
         """Extract visual-prompt features from the model output."""
         vnc = feats[0].shape[1] - self.ori_reg_max * 4 - self.ori_nc
 
@@ -977,7 +983,7 @@ class TVPSegmentLoss(TVPDetectLoss):
         super().__init__(model)
         self.vp_criterion = v8SegmentationLoss(model)
 
-    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for text-visual prompt segmentation."""
         feats, pred_masks, proto = preds if len(preds) == 3 else preds[1]
         assert self.ori_reg_max == self.vp_criterion.reg_max  # TODO: remove it
