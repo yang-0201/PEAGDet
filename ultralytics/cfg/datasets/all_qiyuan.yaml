@@ -1,0 +1,59 @@
+# Ultralytics YOLO 🚀, AGPL-3.0 license
+# COCO 2017 dataset https://cocodataset.org by Microsoft
+# Documentation: https://docs.ultralytics.com/datasets/detect/coco/
+# Example usage: yolo train data=coco.yaml
+# parent
+# ├── ultralytics
+# └── datasets
+#     └── coco  ← downloads here (20.1 GB)
+
+# Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
+#path: C:\Users\Yang\Downloads\train # dataset root dir
+train:
+#  - E:\ComfyUI-aki(1)\ComfyUI-aki-v1.6\ComfyUI\output\add_flux_fill_qiyuan_last_64_old\images # train images (relative to 'path') 118287 images
+#  - E:\ComfyUI-aki(1)\ComfyUI-aki-v1.6\ComfyUI\output\add_flux_fill_qiyuan_last_64\images # train images (relative to 'path') 118287 images
+#  - C:\Users\Yang\Documents\WeChat Files\wxid_vidhq7gfm62p22\FileStorage\File\2025-07\content/all/images
+#  - C:\Users\Yang\Documents\WeChat Files\wxid_vidhq7gfm62p22\FileStorage\File\2025-07\content/all_v3/images
+  - C:\Users\Yang\Downloads\train1/images  # val images (relative to 'path') 5000 images
+
+val:
+  - C:\Users\Yang\Downloads\train/images  # val images (relative to 'path') 5000 images
+#  - images/val_dual\0_V_transparent # train images (relative to 'path') 118287 images
+
+test: images/test # val images (relative to 'path') 5000 images
+#test: test-dev2017.txt # 20288 of 40670 images, submit to https://competitions.codalab.org/competitions/20794
+
+# Classes
+names:
+  0: car
+  1: cistern
+  2: command_center
+  3: courtyard
+  4: crossing
+  5: drilling_equipment
+  6: electricity_pylon
+  7: facility
+  8: field_stack
+  9: garden
+  10: gate
+  11: gate_guard
+  12: greenhouse
+  13: hangar
+  14: hole
+  15: hotel
+  16: house
+  17: mound
+  18: pipeline
+  19: ridge
+  20: ruins
+  21: solar_panel
+  22: sports_ground
+  23: square_land
+  24: stone_pillar
+  25: storage_tank
+  26: warehouse
+  27: workshop
+
+
+
+

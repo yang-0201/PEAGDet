@@ -1,0 +1,21 @@
+
+  "settings_version": "0.0.6",
+  "datasets_dir": "E:\\tianchi\\datasets",
+  "weights_dir": "E:\\tianchi\\MHAF-yolov12\\weights",
+  "runs_dir": "E:\\tianchi\\MHAF-yolov12\\runs",
+  "uuid": "784bc9ddc2e36788c1e9d0a47f18a7f75829a1b897eedb2af215ce48260bd1ba",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}
