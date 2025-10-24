@@ -38,7 +38,7 @@ from ultralytics.utils import (
     emojis,
 )
 from ultralytics.utils.autobatch import check_train_batch_size
-from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
+from ultralytics.utils.checks import check_file, check_imgsz, check_model_file_from_stem, print_args
 from ultralytics.utils.dist import ddp_cleanup, generate_ddp_command
 from ultralytics.utils.files import get_latest_run
 from ultralytics.utils.torch_utils import (
@@ -283,7 +283,7 @@ class BaseTrainer:
         if self.amp and RANK in {-1, 0}:  # Single-GPU and DDP
             callbacks_backup = callbacks.default_callbacks.copy()  # backup callbacks as check_amp() resets them
             # self.amp = torch.tensor(check_amp(self.model), device=self.device)
-            self.amp=True
+            self.amp = True
             callbacks.default_callbacks = callbacks_backup  # restore callbacks
         if RANK > -1 and world_size > 1:  # DDP
             dist.broadcast(self.amp.int(), src=0)  # broadcast from rank 0 to all other ranks; gloo errors with boolean
@@ -308,7 +308,7 @@ class BaseTrainer:
         # self.args.mixup = 0.1
         # self.args.copy_paste = 0.1  #增加
         # self.args.scale = 0.5  # 增加
-        #self.args.copy_paste_mode = 'mixup'
+        # self.args.copy_paste_mode = 'mixup'
         # self.args.mosaic = 0.0
         # self.args.copy_paste = 0.0
         # self.args.mixup = 0.0

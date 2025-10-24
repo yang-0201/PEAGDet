@@ -3,7 +3,7 @@
 import math
 import random
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Union
 
 import cv2
 import numpy as np
@@ -625,7 +625,8 @@ class Mosaic(BaseMixTransform):
         def place_patch(img, h, w, col, pos):
             """
             Paste one tile into img6 and compute padding offsets for labels.
-            col: "L" or "R"; pos: "mid" | "top" | "bottom"
+
+            col: "L" or "R"; pos: "mid" | "top" | "bottom".
             """
             if col == "L":
                 # Left column ends at x = s
@@ -679,9 +680,7 @@ class Mosaic(BaseMixTransform):
             return padw, padh
 
         # placement order: mid-L, mid-R, top-L, top-R, bottom-L, bottom-R
-        order = [("L", "mid"), ("R", "mid"),
-                 ("L", "top"), ("R", "top"),
-                 ("L", "bottom"), ("R", "bottom")]
+        order = [("L", "mid"), ("R", "mid"), ("L", "top"), ("R", "top"), ("L", "bottom"), ("R", "bottom")]
 
         for i, (col, pos) in enumerate(order):
             labels_patch = labels if i == 0 else labels["mix_labels"][i - 1]
@@ -695,9 +694,8 @@ class Mosaic(BaseMixTransform):
 
         final_labels = self._cat_labels(mosaic_labels)
         # center crop to 2s x 2s (same convention as _mosaic3/_mosaic9)
-        final_labels["img"] = img6[-self.border[0]:self.border[0], -self.border[1]:self.border[1]]
+        final_labels["img"] = img6[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
         return final_labels
-
 
     def _mosaic3(self, labels):
         """
@@ -913,7 +911,6 @@ class Mosaic(BaseMixTransform):
             >>> padw, padh = 50, 50
             >>> updated_labels = Mosaic._update_labels(labels, padw, padh)
         """
-
         nh, nw = labels["img"].shape[:2]
         labels["instances"].convert_bbox(format="xyxy")
         labels["instances"].denormalize(nw, nh)
@@ -953,7 +950,6 @@ class Mosaic(BaseMixTransform):
         instances = []
         imgsz = self.imgsz * 2  # mosaic imgsz
 
-
         for labels in mosaic_labels:
             cls.append(labels["cls"])
             instances.append(labels["instances"])
@@ -975,7 +971,6 @@ class Mosaic(BaseMixTransform):
             final_labels["texts"] = mosaic_labels[0]["texts"]
 
         return final_labels
-
 
 
 class VerticalConcat(BaseMixTransform):
@@ -1050,12 +1045,13 @@ class VerticalConcat(BaseMixTransform):
 
         # Combine instances and class labels
         labels["img"] = concat_img
-        labels['ori_shape'] = (labels['ori_shape'][0]*2, labels['ori_shape'][1])
-        labels['resized_shape'] = (labels['resized_shape'][0] * 2, labels['resized_shape'][1])
+        labels["ori_shape"] = (labels["ori_shape"][0] * 2, labels["ori_shape"][1])
+        labels["resized_shape"] = (labels["resized_shape"][0] * 2, labels["resized_shape"][1])
         labels["instances"] = Instances.concatenate([labels["instances"], instances2], axis=0)
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"]], 0)
 
         return labels
+
 
 class MixUp(BaseMixTransform):
     """
@@ -2061,9 +2057,7 @@ class CopyPaste(BaseMixTransform):
     #     return labels1
 
     def _transform(self, labels1, labels2={}):
-        """
-        Copy-Paste augmentation（支持 3/6 通道，已优化掩码与布尔赋值速度）
-        """
+        """Copy-Paste augmentation（支持 3/6 通道，已优化掩码与布尔赋值速度）."""
         # ---------- 原图与实例 ----------
         im = labels1["img"]  # (H, W, C)
         cls = labels1["cls"]
@@ -2093,11 +2087,9 @@ class CopyPaste(BaseMixTransform):
             instances = Instances.concatenate((instances, instances2[[j]]), axis=0)
 
             # 填充掩码 （一次只画一个多边形，仍可后续批量优化）
-            cv2.drawContours(mask2d,
-                             instances2.segments[[j]].astype(np.int32),
-                             contourIdx=-1,
-                             color=1,
-                             thickness=cv2.FILLED)
+            cv2.drawContours(
+                mask2d, instances2.segments[[j]].astype(np.int32), contourIdx=-1, color=1, thickness=cv2.FILLED
+            )
 
         # ---------- 生成目标图像 ----------
         result = labels2.get("img", cv2.flip(im, 1))
@@ -2116,6 +2108,7 @@ class CopyPaste(BaseMixTransform):
         labels1["instances"] = instances
 
         return labels1
+
     # def _transform(self, labels1, labels2={}):
     #     """Apply Copy-Paste augmentation to combine objects from another image into the current image."""
     #     im = labels1["img"]
@@ -2162,6 +2155,7 @@ class CopyPaste(BaseMixTransform):
     #     # labels1["instances"].segments = np.empty((0, 1000, 2), dtype=np.float32)
     #
     #     return labels1
+
 
 class CopyPaste_seg(BaseMixTransform):
     """
@@ -2259,6 +2253,8 @@ class CopyPaste_seg(BaseMixTransform):
         labels1["cls"] = cls
         labels1["instances"] = instances
         return labels1
+
+
 class Albumentations:
     """
     Albumentations transformations for image augmentation.
@@ -2380,7 +2376,7 @@ class Albumentations:
                 A.CLAHE(p=0.01),
                 A.RandomBrightnessContrast(p=0.1, brightness_limit=0.4, contrast_limit=0.4),
                 # A.RandomGamma(p=0.01),
-                A.ImageCompression( p=0.1, quality_lower=20),
+                A.ImageCompression(p=0.1, quality_lower=20),
             ]
 
             # Compose transforms
@@ -2795,10 +2791,10 @@ class RandomLoadText:
     def __init__(
         self,
         prompt_format: str = "{}",
-        neg_samples: Tuple[int, int] = (80, 80),
+        neg_samples: tuple[int, int] = (80, 80),
         max_samples: int = 80,
         padding: bool = False,
-        padding_value: List[str] = [""],
+        padding_value: list[str] = [""],
     ) -> None:
         """
         Initialize the RandomLoadText class for randomly sampling positive and negative texts.
@@ -2839,7 +2835,7 @@ class RandomLoadText:
         self.padding = padding
         self.padding_value = padding_value
 
-    def __call__(self, labels: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
         """
         Randomly sample positive and negative texts and update class indices accordingly.
 
