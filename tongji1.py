@@ -1,36 +1,40 @@
-import os
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 # 目录与文件
 path_pred = Path(r"E:\tianchi\Dual-MHAF-yolov12\runs\res191\labels_resume")  # 预测(含conf)的labels
-path_orig = Path(r"E:\tianchi\Dual-MHAF-yolov12\runs\res191\labels")         # 原始labels(用于top_y检查)
+path_orig = Path(r"E:\tianchi\Dual-MHAF-yolov12\runs\res191\labels")  # 原始labels(用于top_y检查)
 image_path = Path(r"E:\datasets\images\testB")
 result_path = Path("./result_cut.txt")
+
 
 # 线性映射：把[0.14, 1.0]单调映射到[0.25, 1.0]
 def remap_conf(conf, old_min=0.14, old_max=1.0, new_min=0.25, new_max=1.0):
     c = min(max(conf, old_min), old_max)
     scale = (new_max - new_min) / (old_max - old_min)  # 0.75 / 0.86  (按你给的0.14修正)
     new_c = new_min + (c - old_min) * scale
-    if new_c < new_min: new_c = new_min
-    if new_c > new_max: new_c = new_max
+    if new_c < new_min:
+        new_c = new_min
+    if new_c > new_max:
+        new_c = new_max
     return new_c
+
 
 def get_top_y(yolo_bbox, img_h=720):
     cx, cy, w, h = yolo_bbox
     return (cy - h / 2) * img_h
 
+
 # 收集图片基名（按文件名顺序写结果，缺label时写空行）
 filenames = sorted(p.stem for p in image_path.iterdir() if p.is_file())
 
 # ====== 新增：类别-置信度累加器（原始/重映射） ======
-sum_conf_raw = defaultdict(float)      # {cls: sum of raw conf}
-sum_conf_mapped = defaultdict(float)   # {cls: sum of mapped conf}
-count_conf = defaultdict(int)          # {cls: count}
+sum_conf_raw = defaultdict(float)  # {cls: sum of raw conf}
+sum_conf_mapped = defaultdict(float)  # {cls: sum of mapped conf}
+count_conf = defaultdict(int)  # {cls: count}
 
 idx = 0  # 统计top_y<1的框数量
-with result_path.open('w', encoding='utf-8') as out:
+with result_path.open("w", encoding="utf-8") as out:
     out.write("3358655 19.8\n")
     # out.write("2662420 19.2\n")
 
@@ -40,7 +44,7 @@ with result_path.open('w', encoding='utf-8') as out:
 
         # 先做top_y检查（若存在原始label）
         if orig_file.exists():
-            with orig_file.open('r', encoding='utf-8') as f:
+            with orig_file.open("r", encoding="utf-8") as f:
                 for line in f:
                     parts = line.strip().split()
                     if len(parts) >= 5:
@@ -57,7 +61,7 @@ with result_path.open('w', encoding='utf-8') as out:
             continue
 
         tokens = []
-        with pred_file.open('r', encoding='utf-8') as f:
+        with pred_file.open("r", encoding="utf-8") as f:
             for raw in f:
                 s = raw.strip().split()
                 # 期望格式：cls cx cy w h conf

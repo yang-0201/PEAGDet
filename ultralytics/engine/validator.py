@@ -189,7 +189,6 @@ class BaseValidator:
             # model.warmup(imgsz=(1 if pt else self.args.batch, self.data["channels"], imgsz, imgsz))  # warmup
             model.warmup(imgsz=(1 if pt else self.args.batch, 6, imgsz, imgsz))  # warmup
 
-
         self.run_callbacks("on_val_start")
         dt = (
             Profile(device=self.device),

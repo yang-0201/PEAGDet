@@ -16,18 +16,20 @@ Examples:
     >>> torch.onnx.export(m, x, f)
     >>> os.system(f"onnxslim {f} {f} && open {f}")  # pip install onnxslim
 """
+
 from ..modules.mafyolo import (
     AVG,
+    TFCF,
+    Add,
+    Dual_in,
+    Dual_out,
+    DySample,
+    RepHEA,
     RepHMS,
     UniRepLKNetBlock,
-    Dual_in,
-    Dual_out,Add,TFCF, DySample, RepHEA, UniRepSingleAxisConvBlock
-
+    UniRepSingleAxisConvBlock,
 )
-from ..modules.pcaf_dpag import (
-    PCAF, PCAF_DPAG
-
-)
+from ..modules.pcaf_dpag import PCAF, PCAF_DPAG
 from .block import (
     C1,
     C2,
@@ -91,6 +93,7 @@ from .head import (
     OBB,
     Classify,
     Detect,
+    Detect_Aux,
     LRPCHead,
     Pose,
     RTDETRDecoder,
@@ -99,7 +102,6 @@ from .head import (
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
-    Detect_Aux
 )
 from .transformer import (
     AIFI,
