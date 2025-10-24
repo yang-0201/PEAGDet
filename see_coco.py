@@ -1,19 +1,20 @@
-import os
 import json
-from PIL import Image
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+import os
 from collections import defaultdict
+
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+from PIL import Image
 from tqdm import tqdm
 
 # ==== 配置路径 ====
 json_path = "./output_path/pred.json"  # 替换为你的COCO格式预测文件
-image_dir = r"E:\tianchi\ultralytics\sliced_val_add_person\images\val"        # 图像原图目录
-output_dir = "./vis_results"         # 输出目录
+image_dir = r"E:\tianchi\ultralytics\sliced_val_add_person\images\val"  # 图像原图目录
+output_dir = "./vis_results"  # 输出目录
 os.makedirs(output_dir, exist_ok=True)
 
 # ==== 加载 COCO 格式数据 ====
-with open(json_path, 'r') as f:
+with open(json_path) as f:
     coco_data = json.load(f)
 
 images = coco_data["images"]
@@ -30,6 +31,7 @@ img_id_to_file = {img["id"]: img["file_name"] for img in images}
 img_id_to_anns = defaultdict(list)
 for ann in annotations:
     img_id_to_anns[ann["image_id"]].append(ann)
+
 
 # ==== 可视化并保存 ====
 def visualize_and_save(image_id, file_name, anns):
@@ -51,15 +53,15 @@ def visualize_and_save(image_id, file_name, anns):
         if score is not None:
             label += f" {score:.2f}"
 
-        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor='lime', facecolor='none')
+        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor="lime", facecolor="none")
         ax.add_patch(rect)
-        ax.text(x, y - 2, label, color='white', fontsize=8,
-                bbox=dict(facecolor='black', alpha=0.5, pad=0))
+        ax.text(x, y - 2, label, color="white", fontsize=8, bbox=dict(facecolor="black", alpha=0.5, pad=0))
 
-    ax.axis('off')
+    ax.axis("off")
     save_path = os.path.join(output_dir, file_name)
-    plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+    plt.savefig(save_path, bbox_inches="tight", pad_inches=0)
     plt.close()
+
 
 # ==== 批量执行 ====
 print("开始批量可视化并保存图像...")
