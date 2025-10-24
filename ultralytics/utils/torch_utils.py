@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -357,8 +357,7 @@ def model_info(model, detailed=False, verbose=True, imgsz=640):
 
     # flops = get_flops(model, [1792,512])  # imgsz may be int or list, i.e. imgsz=640 or imgsz=[640, 320]
 
-    flops = get_flops(model, [imgsz,imgsz])  # imgsz may be int or list, i.e. imgsz=640 or imgsz=[640, 320]
-
+    flops = get_flops(model, [imgsz, imgsz])  # imgsz may be int or list, i.e. imgsz=640 or imgsz=[640, 320]
 
     fused = " (fused)" if getattr(model, "is_fused", lambda: False)() else ""
     fs = f", {flops:.1f} GFLOPs" if flops else ""
@@ -714,7 +713,7 @@ class ModelEMA:
             copy_attr(self.ema, model, include, exclude)
 
 
-def strip_optimizer(f: Union[str, Path] = "best.pt", s: str = "", updates: Dict[str, Any] = None) -> Dict[str, Any]:
+def strip_optimizer(f: Union[str, Path] = "best.pt", s: str = "", updates: dict[str, Any] = None) -> dict[str, Any]:
     """
     Strip optimizer from 'f' to finalize training, optionally save as 's'.
 

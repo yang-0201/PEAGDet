@@ -337,20 +337,25 @@ def non_max_suppression(
             break  # time limit exceeded
 
     return (output, keepi) if return_idxs else output
+
+
 from torchvision.ops import box_iou
 
+
 @torch.no_grad()
-def soft_nms(boxes: torch.Tensor,
-             scores: torch.Tensor,
-             iou_threshold: float = 0.5,
-             sigma: float = 0.5,
-             score_threshold: float = 1e-3,
-             method: str = "linear"):
+def soft_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    iou_threshold: float = 0.5,
+    sigma: float = 0.5,
+    score_threshold: float = 1e-3,
+    method: str = "linear",
+):
     """
     boxes: [N,4]  (xyxy)
     scores: [N]
     method: "linear" | "gaussian"
-    返回：保留下来的原始索引（LongTensor），按选择顺序排列
+    返回：保留下来的原始索引（LongTensor），按选择顺序排列.
     """
     if boxes.numel() == 0:
         return boxes.new_zeros((0,), dtype=torch.long)
@@ -358,7 +363,7 @@ def soft_nms(boxes: torch.Tensor,
     # 为了数值稳定，用 float32 计算 IoU
     boxes = boxes.to(dtype=torch.float32)
     scores = scores.clone()
-    idxs   = torch.arange(boxes.size(0), device=boxes.device)
+    idxs = torch.arange(boxes.size(0), device=boxes.device)
 
     keep = []
 
@@ -372,9 +377,9 @@ def soft_nms(boxes: torch.Tensor,
         # 剩余框
         if scores.numel() == 1:
             break
-        rest_boxes  = torch.cat([boxes[:max_i],  boxes[max_i+1:]],  dim=0)
-        rest_scores = torch.cat([scores[:max_i], scores[max_i+1:]], dim=0)
-        rest_idxs   = torch.cat([idxs[:max_i],   idxs[max_i+1:]],   dim=0)
+        rest_boxes = torch.cat([boxes[:max_i], boxes[max_i + 1 :]], dim=0)
+        rest_scores = torch.cat([scores[:max_i], scores[max_i + 1 :]], dim=0)
+        rest_idxs = torch.cat([idxs[:max_i], idxs[max_i + 1 :]], dim=0)
 
         ious = box_iou(max_box, rest_boxes).squeeze(0)  # [M]
 
@@ -395,6 +400,8 @@ def soft_nms(boxes: torch.Tensor,
         boxes, scores, idxs = rest_boxes[keep_mask], rest_scores[keep_mask], rest_idxs[keep_mask]
 
     return torch.tensor(keep, device=boxes.device if boxes.numel() else scores.device, dtype=torch.long)
+
+
 def clip_boxes(boxes, shape):
     """
     Clip bounding boxes to image boundaries.

@@ -13,6 +13,7 @@ import torch.nn as nn
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.modules import (
     AIFI,
+    AVG,
     C1,
     C2,
     C2PSA,
@@ -20,12 +21,16 @@ from ultralytics.nn.modules import (
     C3TR,
     ELAN1,
     OBB,
+    PCAF,
+    PCAF_DPAG,
     PSA,
     SPP,
     SPPELAN,
     SPPF,
+    TFCF,
     A2C2f,
     AConv,
+    Add,
     ADown,
     Bottleneck,
     BottleneckCSP,
@@ -44,8 +49,12 @@ from ultralytics.nn.modules import (
     Conv2,
     ConvTranspose,
     Detect,
+    Detect_Aux,
+    Dual_in,
+    Dual_out,
     DWConv,
     DWConvTranspose2d,
+    DySample,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -57,6 +66,8 @@ from ultralytics.nn.modules import (
     Pose,
     RepC3,
     RepConv,
+    RepHEA,
+    RepHMS,
     RepNCSPELAN4,
     RepVGGDW,
     ResNetLayer,
@@ -64,19 +75,12 @@ from ultralytics.nn.modules import (
     SCDown,
     Segment,
     TorchVision,
+    UniRepLKNetBlock,
+    UniRepSingleAxisConvBlock,
     WorldDetect,
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
-    Detect_Aux,
-    AVG,
-    RepHMS,
-    RepHEA,
-    UniRepLKNetBlock,
-    UniRepSingleAxisConvBlock,
-    Dual_in,
-    Dual_out,
-    Add,TFCF, PCAF, DySample, PCAF_DPAG
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -87,7 +91,6 @@ from ultralytics.utils.loss import (
     v8OBBLoss,
     v8PoseLoss,
     v8SegmentationLoss,
-    v8DetectionLoss_Aux
 )
 from ultralytics.utils.ops import make_divisible
 from ultralytics.utils.plotting import feature_visualization
@@ -447,7 +450,9 @@ class DetectionModel(BaseModel):
 
         # Build strides
         m = self.model[-1]  # Detect()
-        if isinstance(m, Detect) or isinstance(m, Detect_Aux):  # includes all Detect subclasses like Segment, Pose, OBB, YOLOEDetect, YOLOESegment
+        if isinstance(m, Detect) or isinstance(
+            m, Detect_Aux
+        ):  # includes all Detect subclasses like Segment, Pose, OBB, YOLOEDetect, YOLOESegment
             s = 640  # 2x min stride
             m.inplace = self.inplace
 
@@ -1689,7 +1694,8 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
-            RepHMS, RepHEA
+            RepHMS,
+            RepHEA,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1761,7 +1767,18 @@ def parse_model(d, ch, verbose=True):
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
-            {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect, Detect_Aux}
+            {
+                Detect,
+                WorldDetect,
+                YOLOEDetect,
+                Segment,
+                YOLOESegment,
+                Pose,
+                OBB,
+                ImagePoolingAttn,
+                v10Detect,
+                Detect_Aux,
+            }
         ):
             args.append([ch[x] for x in f])
             if m is Segment or m is YOLOESegment:
