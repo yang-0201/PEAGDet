@@ -1,73 +1,47 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
-import sys, os, torch, math, time, warnings
+import math
+import time
+import warnings
+
 import matplotlib
+import torch
 
-matplotlib.use('AGG')
-import matplotlib.pylab as plt
-import torch.nn as nn
-from torch import optim
-from thop import clever_format
-from functools import partial
-from torch import distributed as dist
-from torch.cuda import amp
-from torch.nn.parallel import DistributedDataParallel as DDP
-from datetime import datetime
-import torch.distributed as dist
-
-from copy import copy, deepcopy
-from pathlib import Path
+matplotlib.use("AGG")
 
 import numpy as np
+import torch.nn as nn
+from torch import distributed as dist
 
-from ultralytics.cfg import get_cfg, get_save_dir
-from ultralytics.data import build_dataloader, build_yolo_dataset
-from ultralytics.data.utils import check_cls_dataset, check_det_dataset
-from ultralytics.engine.trainer import BaseTrainer
-from ultralytics.models import yolo
-from ultralytics.nn.tasks import DetectionModel, attempt_load_one_weight, attempt_load_weights
-# from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK, TQDM, clean_url, colorstr, emojis, callbacks, __version__
-from ultralytics.utils.plotting import plot_images, plot_labels, plot_results
-from ultralytics.utils.torch_utils import de_parallel, torch_distributed_zero_first
-from ultralytics.utils.checks import check_imgsz, print_args, check_amp
-from ultralytics.utils.autobatch import check_train_batch_size
-from ultralytics.utils.torch_utils import ModelEMA, EarlyStopping, one_cycle, init_seeds, select_device
-from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
-from ultralytics.utils.distill_loss import LogicalLoss, FeatureLoss
-# from ultralytics.nn.extra_modules.kernel_warehouse import get_temperature
-
-from ultralytics.utils.torch_utils import (
-    TORCH_2_4,
-    EarlyStopping,
-    ModelEMA,
-    autocast,
-    convert_optimizer_state_dict_to_fp16,
-    init_seeds,
-    one_cycle,
-    select_device,
-    strip_optimizer,
-    torch_distributed_zero_first,
-    unset_deterministic,
-)
+from ultralytics.models.yolo.detect import DetectionTrainer
 from ultralytics.utils import (
     DEFAULT_CFG,
     LOCAL_RANK,
     LOGGER,
     RANK,
     TQDM,
-    YAML,
     callbacks,
-    clean_url,
     colorstr,
-    emojis,
 )
-from ultralytics.models.yolo.detect import DetectionTrainer
+from ultralytics.utils.checks import check_imgsz
+from ultralytics.utils.distill_loss import FeatureLoss, LogicalLoss
+
+# from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK, TQDM, clean_url, colorstr, emojis, callbacks, __version__
+# from ultralytics.nn.extra_modules.kernel_warehouse import get_temperature
+from ultralytics.utils.torch_utils import (
+    TORCH_2_4,
+    EarlyStopping,
+    ModelEMA,
+    de_parallel,
+    unset_deterministic,
+)
 
 
 def get_activation(feat, backbone_idx=-1):
     def hook(model, inputs, outputs):
         if backbone_idx != -1:
-            for _ in range(5 - len(outputs)): outputs.insert(0, None)
+            for _ in range(5 - len(outputs)):
+                outputs.insert(0, None)
             # for idx, i in enumerate(outputs):
             #     if i is None:
             #         print(idx, 'None')
@@ -81,7 +55,6 @@ def get_activation(feat, backbone_idx=-1):
 
 
 class DetectionDistiller(DetectionTrainer):
-
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
         super().__init__(cfg=cfg, overrides=overrides, _callbacks=_callbacks)
         self.logical_disloss = None
@@ -90,9 +63,15 @@ class DetectionDistiller(DetectionTrainer):
 
     def progress_string(self):
         """Returns a formatted string of training progress with epoch, GPU memory, loss, instances and size."""
-        return ('\n' + '%11s' *
-                (4 + len(self.loss_names) + 2)) % (
-        'Epoch', 'GPU_mem', *self.loss_names, 'log_loss', 'fea_loss', 'Instances', 'Size')
+        return ("\n" + "%11s" * (4 + len(self.loss_names) + 2)) % (
+            "Epoch",
+            "GPU_mem",
+            *self.loss_names,
+            "log_loss",
+            "fea_loss",
+            "Instances",
+            "Size",
+        )
 
     def setup_teacher_model(self):
         """Load/create/download model for any task."""
@@ -106,7 +85,7 @@ class DetectionDistiller(DetectionTrainer):
         # self.teacher_model = self.get_model(cfg=cfg, weights=weights, verbose=RANK == -1)  # calls Model(cfg, weights)
 
         ckpt = torch.load(self.args.teacher_weights, map_location=self.device)
-        self.teacher_model = ckpt['ema' if ckpt.get('ema') else 'model'].float()
+        self.teacher_model = ckpt["ema" if ckpt.get("ema") else "model"].float()
         self.teacher_model.train()
         self.teacher_model.info()
         return ckpt
@@ -196,35 +175,48 @@ class DetectionDistiller(DetectionTrainer):
 
         # Init Distill Loss
         self.kd_logical_loss, self.kd_feature_loss = None, None
-        if self.args.kd_loss_type == 'logical' or self.args.kd_loss_type == 'all':
+        if self.args.kd_loss_type == "logical" or self.args.kd_loss_type == "all":
             self.kd_logical_loss = LogicalLoss(self.args, self.model, self.args.logical_loss_type)
-        if self.args.kd_loss_type == 'feature' or self.args.kd_loss_type == 'all':
+        if self.args.kd_loss_type == "feature" or self.args.kd_loss_type == "all":
             s_feature, t_feature = [], []
             hooks = []
-            self.teacher_kd_layers, self.student_kd_layers = self.args.teacher_kd_layers.split(
-                ','), self.args.student_kd_layers.split(',')
+            self.teacher_kd_layers, self.student_kd_layers = (
+                self.args.teacher_kd_layers.split(","),
+                self.args.student_kd_layers.split(","),
+            )
             s_feature_idx, t_feature_idx = [], []
-            assert len(self.teacher_kd_layers) == len(
-                self.student_kd_layers), f"teacher{self.teacher_kd_layers} and student{self.student_kd_layers} layers not equal.."
+            assert len(self.teacher_kd_layers) == len(self.student_kd_layers), (
+                f"teacher{self.teacher_kd_layers} and student{self.student_kd_layers} layers not equal.."
+            )
             for t_layer, s_layer in zip(self.teacher_kd_layers, self.student_kd_layers):
-                if '-' in t_layer:
-                    t_layer_first, t_layer_second = t_layer.split('-')
+                if "-" in t_layer:
+                    t_layer_first, t_layer_second = t_layer.split("-")
                     t_feature_idx.append(int(t_layer_second) / 10)
-                    hooks.append(de_parallel(self.teacher_model).model[int(t_layer_first)].register_forward_hook(
-                        get_activation(t_feature, backbone_idx=int(t_layer_second))))
-                else:
-                    hooks.append(de_parallel(self.teacher_model).model[int(t_layer)].register_forward_hook(
-                        get_activation(t_feature)))
-                    t_feature_idx.append(int(t_layer))
-
-                if '-' in s_layer:
-                    s_layer_first, s_layer_second = s_layer.split('-')
-                    s_feature_idx.append(int(s_layer_second) / 10)
-                    hooks.append(de_parallel(self.model).model[int(s_layer_first)].register_forward_hook(
-                        get_activation(s_feature, backbone_idx=int(s_layer_second))))
+                    hooks.append(
+                        de_parallel(self.teacher_model)
+                        .model[int(t_layer_first)]
+                        .register_forward_hook(get_activation(t_feature, backbone_idx=int(t_layer_second)))
+                    )
                 else:
                     hooks.append(
-                        de_parallel(self.model).model[int(s_layer)].register_forward_hook(get_activation(s_feature)))
+                        de_parallel(self.teacher_model)
+                        .model[int(t_layer)]
+                        .register_forward_hook(get_activation(t_feature))
+                    )
+                    t_feature_idx.append(int(t_layer))
+
+                if "-" in s_layer:
+                    s_layer_first, s_layer_second = s_layer.split("-")
+                    s_feature_idx.append(int(s_layer_second) / 10)
+                    hooks.append(
+                        de_parallel(self.model)
+                        .model[int(s_layer_first)]
+                        .register_forward_hook(get_activation(s_feature, backbone_idx=int(s_layer_second)))
+                    )
+                else:
+                    hooks.append(
+                        de_parallel(self.model).model[int(s_layer)].register_forward_hook(get_activation(s_feature))
+                    )
                     s_feature_idx.append(int(s_layer))
 
             inputs = torch.randn((2, 6, self.args.imgsz, self.args.imgsz)).to(self.device)
@@ -234,9 +226,11 @@ class DetectionDistiller(DetectionTrainer):
             s_feature_sort_idx, t_feature_sort_idx = sorted(s_feature_idx), sorted(t_feature_idx)
             s_feature_idx = [s_feature_sort_idx.index(i) for i in s_feature_idx]
             t_feature_idx = [t_feature_sort_idx.index(i) for i in t_feature_idx]
-            self.kd_feature_loss = FeatureLoss([s_feature[i].size(1) for i in s_feature_idx],
-                                               [t_feature[i].size(1) for i in t_feature_idx],
-                                               distiller=self.args.feature_loss_type)
+            self.kd_feature_loss = FeatureLoss(
+                [s_feature[i].size(1) for i in s_feature_idx],
+                [t_feature[i].size(1) for i in t_feature_idx],
+                distiller=self.args.feature_loss_type,
+            )
             for hook in hooks:
                 hook.remove()
 
@@ -293,30 +287,40 @@ class DetectionDistiller(DetectionTrainer):
             self._model_train()
 
             # TODO: 修改为DDP
-            if self.args.kd_loss_type in ['feature', 'all']:
+            if self.args.kd_loss_type in ["feature", "all"]:
                 self.kd_feature_loss.train()
                 hooks = []
                 s_feature, t_feature = [], []
                 s_feature_idx, t_feature_idx = [], []
                 for t_layer, s_layer in zip(self.teacher_kd_layers, self.student_kd_layers):
-                    if '-' in t_layer:
-                        t_layer_first, t_layer_second = t_layer.split('-')
+                    if "-" in t_layer:
+                        t_layer_first, t_layer_second = t_layer.split("-")
                         t_feature_idx.append(int(t_layer_second) / 10)
-                        hooks.append(de_parallel(self.teacher_model).model[int(t_layer_first)].register_forward_hook(
-                            get_activation(t_feature, backbone_idx=int(t_layer_second))))
+                        hooks.append(
+                            de_parallel(self.teacher_model)
+                            .model[int(t_layer_first)]
+                            .register_forward_hook(get_activation(t_feature, backbone_idx=int(t_layer_second)))
+                        )
                     else:
-                        hooks.append(de_parallel(self.teacher_model).model[int(t_layer)].register_forward_hook(
-                            get_activation(t_feature)))
+                        hooks.append(
+                            de_parallel(self.teacher_model)
+                            .model[int(t_layer)]
+                            .register_forward_hook(get_activation(t_feature))
+                        )
                         t_feature_idx.append(int(t_layer))
 
-                    if '-' in s_layer:
-                        s_layer_first, s_layer_second = s_layer.split('-')
+                    if "-" in s_layer:
+                        s_layer_first, s_layer_second = s_layer.split("-")
                         s_feature_idx.append(int(s_layer_second) / 10)
-                        hooks.append(de_parallel(self.model).model[int(s_layer_first)].register_forward_hook(
-                            get_activation(s_feature, backbone_idx=int(s_layer_second))))
+                        hooks.append(
+                            de_parallel(self.model)
+                            .model[int(s_layer_first)]
+                            .register_forward_hook(get_activation(s_feature, backbone_idx=int(s_layer_second)))
+                        )
                     else:
-                        hooks.append(de_parallel(self.model).model[int(s_layer)].register_forward_hook(
-                            get_activation(s_feature)))
+                        hooks.append(
+                            de_parallel(self.model).model[int(s_layer)].register_forward_hook(get_activation(s_feature))
+                        )
                         s_feature_idx.append(int(s_layer))
 
                 s_feature_sort_idx, t_feature_sort_idx = sorted(s_feature_idx), sorted(t_feature_idx)
@@ -355,61 +359,78 @@ class DetectionDistiller(DetectionTrainer):
                         if "momentum" in x:
                             x["momentum"] = np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum])
 
-                if hasattr(de_parallel(self.model), 'net_update_temperature'):
+                if hasattr(de_parallel(self.model), "net_update_temperature"):
                     temp = get_temperature(i + 1, epoch, len(self.train_loader), temp_epoch=20, temp_init_value=1.0)
                     de_parallel(self.model).net_update_temperature(temp)
 
-                if self.args.kd_loss_decay == 'constant':
+                if self.args.kd_loss_decay == "constant":
                     distill_decay = 1.0
-                elif self.args.kd_loss_decay == 'cosine':
+                elif self.args.kd_loss_decay == "cosine":
                     eta_min, base_ratio, T_max = 0.01, 1.0, 10
                     distill_decay = eta_min + (base_ratio - eta_min) * (1 + math.cos(math.pi * i / T_max)) / 2
-                elif self.args.kd_loss_decay == 'linear':
+                elif self.args.kd_loss_decay == "linear":
                     distill_decay = ((1 - math.cos(i * math.pi / len(self.train_loader))) / 2) * (0.01 - 1) + 1
-                elif self.args.kd_loss_decay == 'cosine_epoch':
+                elif self.args.kd_loss_decay == "cosine_epoch":
                     eta_min, base_ratio, T_max = 0.01, 1.0, 10
                     distill_decay = eta_min + (base_ratio - eta_min) * (1 + math.cos(math.pi * ni / T_max)) / 2
-                elif self.args.kd_loss_decay == 'linear_epoch':
+                elif self.args.kd_loss_decay == "linear_epoch":
                     distill_decay = ((1 - math.cos(ni * math.pi / (self.epochs * nb))) / 2) * (0.01 - 1) + 1
 
                 # Forward
                 with torch.cuda.amp.autocast(self.amp):
                     batch = self.preprocess_batch(batch)
-                    pred = de_parallel(self.model).predict(batch['img'])
+                    pred = de_parallel(self.model).predict(batch["img"])
 
                     with torch.no_grad():
-                        t_pred = de_parallel(self.teacher_model).predict(batch['img'])
+                        t_pred = de_parallel(self.teacher_model).predict(batch["img"])
                     # print("criterion:", de_parallel(self.model).criterion)
                     main_loss, self.loss_items = de_parallel(self.model).criterion(pred, batch)
 
-                    log_distill_loss, fea_distill_loss = torch.zeros(1, device=self.device), torch.zeros(1,
-                                                                                                         device=self.device)
+                    log_distill_loss, fea_distill_loss = (
+                        torch.zeros(1, device=self.device),
+                        torch.zeros(1, device=self.device),
+                    )
                     if self.kd_logical_loss is not None:
                         if type(pred) is dict and type(t_pred) is dict:
-                            log_distill_loss = self.kd_logical_loss(pred['one2one'], t_pred['one2one'], batch,
-                                                                    True) * self.args.logical_loss_ratio
-                            log_distill_loss += self.kd_logical_loss(pred['one2many'], t_pred['one2many'],
-                                                                     batch) * self.args.logical_loss_ratio * 0.5
+                            log_distill_loss = (
+                                self.kd_logical_loss(pred["one2one"], t_pred["one2one"], batch, True)
+                                * self.args.logical_loss_ratio
+                            )
+                            log_distill_loss += (
+                                self.kd_logical_loss(pred["one2many"], t_pred["one2many"], batch)
+                                * self.args.logical_loss_ratio
+                                * 0.5
+                            )
                         else:
                             log_distill_loss = self.kd_logical_loss(pred, t_pred, batch) * self.args.logical_loss_ratio
                     if self.kd_feature_loss is not None:
-                        fea_distill_loss = self.kd_feature_loss([s_feature[i] for i in s_feature_idx],
-                                                                [t_feature[i] for i in
-                                                                 t_feature_idx]) * self.args.feature_loss_ratio
+                        fea_distill_loss = (
+                            self.kd_feature_loss(
+                                [s_feature[i] for i in s_feature_idx], [t_feature[i] for i in t_feature_idx]
+                            )
+                            * self.args.feature_loss_ratio
+                        )
 
                     # print("main loss", main_loss, log_distill_loss, fea_distill_loss)
-                    self.loss = main_loss.sum() + (log_distill_loss + fea_distill_loss) * batch['img'].size(
-                        0) * distill_decay * 0.2
+                    self.loss = (
+                        main_loss.sum()
+                        + (log_distill_loss + fea_distill_loss) * batch["img"].size(0) * distill_decay * 0.2
+                    )
                     if RANK != -1:
                         self.loss *= world_size
-                    self.tloss = (self.tloss * i + self.loss_items) / (i + 1) if self.tloss is not None \
-                        else self.loss_items
-                    self.logical_disloss = (self.logical_disloss * i + log_distill_loss) / (
-                                i + 1) if self.logical_disloss is not None \
+                    self.tloss = (
+                        (self.tloss * i + self.loss_items) / (i + 1) if self.tloss is not None else self.loss_items
+                    )
+                    self.logical_disloss = (
+                        (self.logical_disloss * i + log_distill_loss) / (i + 1)
+                        if self.logical_disloss is not None
                         else log_distill_loss
-                    self.feature_disloss = (self.feature_disloss * i + fea_distill_loss) / (
-                                i + 1) if self.feature_disloss is not None \
+                    )
+                    self.feature_disloss = (
+                        (self.feature_disloss * i + fea_distill_loss) / (i + 1)
+                        if self.feature_disloss is not None
                         else fea_distill_loss
+                    )
                     # print(self.loss)
                     # Backward
                     self.scaler.scale(self.loss).backward()
@@ -429,17 +450,19 @@ class DetectionDistiller(DetectionTrainer):
                             if self.stop:  # training time exceeded
                                 break
                     # start: 新增
-                    mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
+                    mem = f"{torch.cuda.memory_reserved() / 1e9 if torch.cuda.is_available() else 0:.3g}G"  # (GB)
                     loss_len = self.tloss.shape[0] if len(self.tloss.size()) else 1
                     losses = self.tloss if loss_len > 1 else torch.unsqueeze(self.tloss, 0)
-                    logical_dislosses = self.logical_disloss if loss_len > 1 else torch.unsqueeze(self.logical_disloss,
-                                                                                                  0)
-                    feature_dislosses = self.feature_disloss if loss_len > 1 else torch.unsqueeze(self.feature_disloss,
-                                                                                                  0)
+                    logical_dislosses = (
+                        self.logical_disloss if loss_len > 1 else torch.unsqueeze(self.logical_disloss, 0)
+                    )
+                    feature_dislosses = (
+                        self.feature_disloss if loss_len > 1 else torch.unsqueeze(self.feature_disloss, 0)
+                    )
                     # end
                     # Log
                     if RANK in {-1, 0}:
-                        loss_length = self.tloss.shape[0] if len(self.tloss.shape) else 1
+                        self.tloss.shape[0] if len(self.tloss.shape) else 1
                         # pbar.set_description(
                         #     ("%11s" * 2 + "%11.4g" * (2 + loss_length))
                         #     % (
@@ -451,10 +474,17 @@ class DetectionDistiller(DetectionTrainer):
                         #     )
                         # )
                         pbar.set_description(
-                            ('%11s' * 2 + '%11.4g' * (2 + loss_len + 2)) %
-                            (f'{epoch + 1}/{self.epochs}', mem, *losses, *logical_dislosses, *feature_dislosses,
-                             batch['cls'].shape[0],
-                             batch['img'].shape[-1]))
+                            ("%11s" * 2 + "%11.4g" * (2 + loss_len + 2))
+                            % (
+                                f"{epoch + 1}/{self.epochs}",
+                                mem,
+                                *losses,
+                                *logical_dislosses,
+                                *feature_dislosses,
+                                batch["cls"].shape[0],
+                                batch["img"].shape[-1],
+                            )
+                        )
                         self.run_callbacks("on_batch_end")
                         if self.args.plots and ni in self.plot_idx:
                             self.plot_training_samples(batch, ni)
@@ -467,7 +497,7 @@ class DetectionDistiller(DetectionTrainer):
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
 
             with warnings.catch_warnings():
-                warnings.simplefilter('ignore')  # suppress 'Detected lr_scheduler.step() before optimizer.step()'
+                warnings.simplefilter("ignore")  # suppress 'Detected lr_scheduler.step() before optimizer.step()'
                 self.scheduler.step()
             self.run_callbacks("on_train_epoch_end")
 

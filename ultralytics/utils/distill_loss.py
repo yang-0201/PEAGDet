@@ -1,31 +1,31 @@
+import functools
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from ultralytics.utils.metrics import bbox_iou
-from ultralytics.utils.checks import check_version
-from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
+from ultralytics.utils.ops import xywh2xyxy
 from ultralytics.utils.tal import TaskAlignedAssigner, dist2bbox, make_anchors
 from ultralytics.utils.torch_utils import de_parallel
-
-import functools
 
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class LogicalLoss(nn.Module):
-    def __init__(self, hyp, model, distiller='l2', task='detect') -> None:
+    def __init__(self, hyp, model, distiller="l2", task="detect") -> None:
         super().__init__()
 
-        if distiller in ['l2', 'l1']:
-            if task == 'detect':
+        if distiller in ["l2", "l1"]:
+            if task == "detect":
                 self.logical_loss = OutputLoss(hyp, distiller)
-            elif task == 'pose':
+            elif task == "pose":
                 self.logical_loss = OutputLoss_Pose(hyp, distiller)
                 self.logical_loss.kpt_shape = de_parallel(model).kpt_shape
-            elif task == 'obb':
+            elif task == "obb":
                 self.logical_loss = OutputLoss_OBB(hyp, distiller)
-            elif task == 'segment':
+            elif task == "segment":
                 self.logical_loss = OutputLoss_Seg(hyp, distiller)
-        elif distiller == 'BCKD':
+        elif distiller == "BCKD":
             self.logical_loss = BCKD(hyp)
 
         self.logical_loss.nc = de_parallel(model).nc
@@ -34,20 +34,23 @@ class LogicalLoss(nn.Module):
         self.logical_loss.stride = de_parallel(model).model[-1].stride
         self.logical_loss.use_dfl = self.logical_loss.reg_max > 1
         self.logical_loss.device = next(de_parallel(model).parameters()).device
-        self.logical_loss.proj = torch.arange(de_parallel(model).model[-1].reg_max, dtype=torch.float,
-                                              device=self.logical_loss.device)
+        self.logical_loss.proj = torch.arange(
+            de_parallel(model).model[-1].reg_max, dtype=torch.float, device=self.logical_loss.device
+        )
 
-        if distiller == 'BCKD':
-            self.logical_loss.assigner = TaskAlignedAssigner(topk=10, num_classes=de_parallel(model).nc, alpha=0.5,
-                                                             beta=6.0)
-            self.logical_loss.assigner_o2o = TaskAlignedAssigner(topk=1, num_classes=de_parallel(model).nc, alpha=0.5,
-                                                                 beta=6.0)
+        if distiller == "BCKD":
+            self.logical_loss.assigner = TaskAlignedAssigner(
+                topk=10, num_classes=de_parallel(model).nc, alpha=0.5, beta=6.0
+            )
+            self.logical_loss.assigner_o2o = TaskAlignedAssigner(
+                topk=1, num_classes=de_parallel(model).nc, alpha=0.5, beta=6.0
+            )
 
         self.distiller = distiller
 
     def forward(self, s_p, t_p, batch, o2o=False):
         assert len(s_p) == len(t_p)
-        if self.distiller == 'BCKD':
+        if self.distiller == "BCKD":
             loss = self.logical_loss(s_p, t_p, batch, o2o=o2o)
         else:
             loss = self.logical_loss(s_p, t_p, batch)
@@ -56,31 +59,33 @@ class LogicalLoss(nn.Module):
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class OutputLoss(nn.Module):
-    def __init__(self, hyp, distiller='l2'):
+    def __init__(self, hyp, distiller="l2"):
         super().__init__()
 
-        if distiller == 'l2':
-            box_loss = torch.nn.MSELoss(reduction='none')
-            cls_loss = torch.nn.MSELoss(reduction='none')
-        elif distiller == 'l1':
-            box_loss = torch.nn.L1Loss(reduction='none')
-            cls_loss = torch.nn.L1Loss(reduction='none')
+        if distiller == "l2":
+            box_loss = torch.nn.MSELoss(reduction="none")
+            cls_loss = torch.nn.MSELoss(reduction="none")
+        elif distiller == "l1":
+            box_loss = torch.nn.L1Loss(reduction="none")
+            cls_loss = torch.nn.L1Loss(reduction="none")
         else:
             raise NotImplementedError
 
         self.box_loss = box_loss
         self.cls_loss = cls_loss
         self.hyp = hyp
-        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     def forward(self, s_p, t_p, batch):
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
 
         s_pred_distri, s_pred_scores = torch.cat([xi.view(s_p[0].shape[0], self.no, -1) for xi in s_p], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
         t_pred_distri, t_pred_scores = torch.cat([xi.view(t_p[0].shape[0], self.no, -1) for xi in t_p], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
 
         t_obj_scale = t_pred_scores.sigmoid().max(1)[0].unsqueeze(1)
 
@@ -94,7 +99,7 @@ class OutputLoss(nn.Module):
 
 
 class OutputLoss_Pose(OutputLoss):
-    def __init__(self, hyp, distiller='l2'):
+    def __init__(self, hyp, distiller="l2"):
         super().__init__(hyp, distiller)
 
     def forward(self, s_p, t_p, batch):
@@ -103,16 +108,19 @@ class OutputLoss_Pose(OutputLoss):
         lpose = torch.zeros(1, device=self.device)  # pose loss
 
         s_pred_distri, s_pred_scores = torch.cat([xi.view(s_p[0][0].shape[0], self.no, -1) for xi in s_p[0]], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
         t_pred_distri, t_pred_scores = torch.cat([xi.view(t_p[0][0].shape[0], self.no, -1) for xi in t_p[0]], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
 
         t_obj_scale = t_pred_scores.sigmoid().max(1)[0].unsqueeze(1)
 
         lbox = torch.mean(self.box_loss(s_pred_distri, t_pred_distri) * t_obj_scale.repeat(1, self.reg_max * 4, 1))
         lcls = torch.mean(self.cls_loss(s_pred_scores, t_pred_scores) * t_obj_scale.repeat(1, self.nc, 1))
         lpose = torch.mean(
-            self.cls_loss(s_p[1], t_p[1]) * t_obj_scale.repeat(1, self.kpt_shape[0] * self.kpt_shape[1], 1))
+            self.cls_loss(s_p[1], t_p[1]) * t_obj_scale.repeat(1, self.kpt_shape[0] * self.kpt_shape[1], 1)
+        )
 
         lbox *= self.hyp.dfl
         lcls *= self.hyp.cls
@@ -122,7 +130,7 @@ class OutputLoss_Pose(OutputLoss):
 
 
 class OutputLoss_OBB(OutputLoss):
-    def __init__(self, hyp, distiller='l2'):
+    def __init__(self, hyp, distiller="l2"):
         super().__init__(hyp, distiller)
 
     def forward(self, s_p, t_p, batch):
@@ -131,9 +139,11 @@ class OutputLoss_OBB(OutputLoss):
         lobb = torch.zeros(1, device=self.device)  # obb loss
 
         s_pred_distri, s_pred_scores = torch.cat([xi.view(s_p[0][0].shape[0], self.no, -1) for xi in s_p[0]], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
         t_pred_distri, t_pred_scores = torch.cat([xi.view(t_p[0][0].shape[0], self.no, -1) for xi in t_p[0]], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
 
         t_obj_scale = t_pred_scores.sigmoid().max(1)[0].unsqueeze(1)
 
@@ -149,7 +159,7 @@ class OutputLoss_OBB(OutputLoss):
 
 
 class OutputLoss_Seg(OutputLoss):
-    def __init__(self, hyp, distiller='l2'):
+    def __init__(self, hyp, distiller="l2"):
         super().__init__(hyp, distiller)
 
     def forward(self, s_p, t_p, batch):
@@ -159,9 +169,11 @@ class OutputLoss_Seg(OutputLoss):
         lproto = torch.zeros(1, device=self.device)  # proto loss
 
         s_pred_distri, s_pred_scores = torch.cat([xi.view(s_p[0][0].shape[0], self.no, -1) for xi in s_p[0]], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
         t_pred_distri, t_pred_scores = torch.cat([xi.view(t_p[0][0].shape[0], self.no, -1) for xi in t_p[0]], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
 
         t_obj_scale = t_pred_scores.sigmoid().max(1)[0].unsqueeze(1)
 
@@ -186,7 +198,7 @@ def reduce_loss(loss, reduction):
         loss (Tensor): Elementwise loss tensor.
         reduction (str): Options are "none", "mean" and "sum".
 
-    Return:
+    Returns:
         Tensor: Reduced loss tensor.
     """
     reduction_enum = F._Reduction.get_enum(reduction)
@@ -199,7 +211,7 @@ def reduce_loss(loss, reduction):
         return loss.sum()
 
 
-def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
+def weight_reduce_loss(loss, weight=None, reduction="mean", avg_factor=None):
     """Apply element-wise weight and reduce loss.
 
     Args:
@@ -220,13 +232,13 @@ def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
         loss = reduce_loss(loss, reduction)
     else:
         # if reduction is mean, then average the loss by avg_factor
-        if reduction == 'mean':
+        if reduction == "mean":
             # Avoid causing ZeroDivisionError when avg_factor is 0.0,
             # i.e., all labels of an image belong to ignore index.
             eps = torch.finfo(torch.float32).eps
             loss = loss.sum() / (avg_factor + eps)
         # if reduction is 'none', then do nothing, otherwise raise an error
-        elif reduction != 'none':
+        elif reduction != "none":
             raise ValueError('avg_factor can not be used with reduction="sum"')
     return loss
 
@@ -234,41 +246,23 @@ def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
 def weighted_loss(loss_func):
     """Create a weighted version of a given loss function.
 
-    To use this decorator, the loss function must have the signature like
-    `loss_func(pred, target, **kwargs)`. The function only needs to compute
-    element-wise loss without any reduction. This decorator will add weight
-    and reduction arguments to the function. The decorated function will have
-    the signature like `loss_func(pred, target, weight=None, reduction='mean',
-    avg_factor=None, **kwargs)`.
+    To use this decorator, the loss function must have the signature like `loss_func(pred, target, **kwargs)`. The
+    function only needs to compute element-wise loss without any reduction. This decorator will add weight and reduction
+    arguments to the function. The decorated function will have the signature like `loss_func(pred, target, weight=None,
+    reduction='mean', avg_factor=None, **kwargs)`.
 
     :Example:
 
-    >>> import torch
-    >>> @weighted_loss
-    >>> def l1_loss(pred, target):
-    >>>     return (pred - target).abs()
+    >>> import torch >>> @weighted_loss >>> def l1_loss(pred, target): >>> return (pred - target).abs()
 
-    >>> pred = torch.Tensor([0, 2, 3])
-    >>> target = torch.Tensor([1, 1, 1])
-    >>> weight = torch.Tensor([1, 0, 1])
+    >>> pred = torch.Tensor([0, 2, 3]) >>> target = torch.Tensor([1, 1, 1]) >>> weight = torch.Tensor([1, 0, 1])
 
-    >>> l1_loss(pred, target)
-    tensor(1.3333)
-    >>> l1_loss(pred, target, weight)
-    tensor(1.)
-    >>> l1_loss(pred, target, reduction='none')
-    tensor([1., 1., 2.])
-    >>> l1_loss(pred, target, weight, avg_factor=2)
-    tensor(1.5000)
+    >>> l1_loss(pred, target) tensor(1.3333) >>> l1_loss(pred, target, weight) tensor(1.) >>> l1_loss(pred, target,
+    reduction="none") tensor([1., 1., 2.]) >>> l1_loss(pred, target, weight, avg_factor=2) tensor(1.5000)
     """
 
     @functools.wraps(loss_func)
-    def wrapper(pred,
-                target,
-                weight=None,
-                reduction='mean',
-                avg_factor=None,
-                **kwargs):
+    def wrapper(pred, target, weight=None, reduction="mean", avg_factor=None, **kwargs):
         # get element-wise loss
         loss = loss_func(pred, target, **kwargs)
         loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
@@ -278,10 +272,7 @@ def weighted_loss(loss_func):
 
 
 @weighted_loss
-def knowledge_distillation_kl_div_loss(pred,
-                                       soft_label,
-                                       T,
-                                       detach_target=True):
+def knowledge_distillation_kl_div_loss(pred, soft_label, T, detach_target=True):
     r"""Loss function for knowledge distilling using KL divergence.
 
     Args:
@@ -298,9 +289,7 @@ def knowledge_distillation_kl_div_loss(pred,
     if detach_target:
         target = target.detach()
 
-    kd_loss = F.kl_div(
-        F.log_softmax(pred / T, dim=1), target, reduction='none').mean(1) * (
-                      T * T)
+    kd_loss = F.kl_div(F.log_softmax(pred / T, dim=1), target, reduction="none").mean(1) * (T * T)
 
     return kd_loss
 
@@ -314,19 +303,14 @@ class KnowledgeDistillationKLDivLoss(nn.Module):
         T (int): Temperature for distillation.
     """
 
-    def __init__(self, reduction='mean', loss_weight=1.0, T=10):
-        super(KnowledgeDistillationKLDivLoss, self).__init__()
+    def __init__(self, reduction="mean", loss_weight=1.0, T=10):
+        super().__init__()
         assert T >= 1
         self.reduction = reduction
         self.loss_weight = loss_weight
         self.T = T
 
-    def forward(self,
-                pred,
-                soft_label,
-                weight=None,
-                avg_factor=None,
-                reduction_override=None):
+    def forward(self, pred, soft_label, weight=None, avg_factor=None, reduction_override=None):
         """Forward function.
 
         Args:
@@ -334,33 +318,23 @@ class KnowledgeDistillationKLDivLoss(nn.Module):
             soft_label (Tensor): Target logits with shape (N, N + 1).
             weight (torch.Tensor, optional): The weight of loss for each
                 prediction. Defaults to None.
-            avg_factor (int, optional): Average factor that is used to average
+            avg_factor (int, optional): Average factor that is used to average the loss. Defaults to None.
+            reduction_override (str, optional): The reduction method used to override the original reduction method of
                 the loss. Defaults to None.
-            reduction_override (str, optional): The reduction method used to
-                override the original reduction method of the loss.
-                Defaults to None.
         """
-        assert reduction_override in (None, 'none', 'mean', 'sum')
+        assert reduction_override in (None, "none", "mean", "sum")
 
-        reduction = (
-            reduction_override if reduction_override else self.reduction)
+        reduction = reduction_override if reduction_override else self.reduction
 
         loss_kd = self.loss_weight * knowledge_distillation_kl_div_loss(
-            pred,
-            soft_label,
-            weight,
-            reduction=reduction,
-            avg_factor=avg_factor,
-            T=self.T)
+            pred, soft_label, weight, reduction=reduction, avg_factor=avg_factor, T=self.T
+        )
 
         return loss_kd
 
 
 @weighted_loss
-def novel_kd_loss(pred,
-                  soft_label,
-                  detach_target=True,
-                  beta=1.0):
+def novel_kd_loss(pred, soft_label, detach_target=True, beta=1.0):
     r"""Loss function for knowledge distilling using KL divergence.
 
     Args:
@@ -380,7 +354,7 @@ def novel_kd_loss(pred,
         target = target.detach()
 
     scale_factor = target - score
-    kd_loss = F.binary_cross_entropy_with_logits(pred, target, reduction='none') * scale_factor.abs().pow(beta)
+    kd_loss = F.binary_cross_entropy_with_logits(pred, target, reduction="none") * scale_factor.abs().pow(beta)
     kd_loss = kd_loss.sum(dim=-1, keepdim=False)
     return kd_loss
 
@@ -394,21 +368,15 @@ class NovelKDLoss(nn.Module):
         T (int): Temperature for distillation.
     """
 
-    def __init__(self, reduction='mean', loss_weight=1.0, T=10, threshold=0.05):
-        super(NovelKDLoss, self).__init__()
+    def __init__(self, reduction="mean", loss_weight=1.0, T=10, threshold=0.05):
+        super().__init__()
         # assert T >= 1
         self.reduction = reduction
         self.loss_weight = loss_weight
         self.T = T
         self.threshold = threshold
 
-    def forward(self,
-                pred,
-                soft_label,
-                weight=None,
-                avg_factor=None,
-                reduction_override=None,
-                beta=1.0):
+    def forward(self, pred, soft_label, weight=None, avg_factor=None, reduction_override=None, beta=1.0):
         """Forward function.
 
         Args:
@@ -416,18 +384,17 @@ class NovelKDLoss(nn.Module):
             soft_label (Tensor): Target logits with shape (N, N + 1).
             weight (torch.Tensor, optional): The weight of loss for each
                 prediction. Defaults to None.
-            avg_factor (int, optional): Average factor that is used to average
+            avg_factor (int, optional): Average factor that is used to average the loss. Defaults to None.
+            reduction_override (str, optional): The reduction method used to override the original reduction method of
                 the loss. Defaults to None.
-            reduction_override (str, optional): The reduction method used to
-                override the original reduction method of the loss.
-                Defaults to None.
         """
-        assert reduction_override in (None, 'none', 'mean', 'sum')
+        assert reduction_override in (None, "none", "mean", "sum")
 
-        reduction = (reduction_override if reduction_override else self.reduction)
+        reduction = reduction_override if reduction_override else self.reduction
 
-        loss_kd = self.loss_weight * novel_kd_loss(pred, soft_label, weight, reduction=reduction, avg_factor=avg_factor,
-                                                   beta=beta)
+        loss_kd = self.loss_weight * novel_kd_loss(
+            pred, soft_label, weight, reduction=reduction, avg_factor=avg_factor, beta=beta
+        )
 
         return loss_kd
 
@@ -470,14 +437,20 @@ class BCKD(nn.Module):
 
     def forward(self, s_p, t_p, batch, o2o=False):
         s_pred_distri, s_pred_scores = torch.cat([xi.view(s_p[0].shape[0], self.no, -1) for xi in s_p], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
         t_pred_distri, t_pred_scores = torch.cat([xi.view(t_p[0].shape[0], self.no, -1) for xi in t_p], 2).split(
-            (self.reg_max * 4, self.nc), 1)
+            (self.reg_max * 4, self.nc), 1
+        )
 
-        s_pred_distri, s_pred_scores = s_pred_distri.permute(0, 2, 1).contiguous(), s_pred_scores.permute(0, 2,
-                                                                                                          1).contiguous()
-        t_pred_distri, t_pred_scores = t_pred_distri.permute(0, 2, 1).contiguous(), t_pred_scores.permute(0, 2,
-                                                                                                          1).contiguous()
+        s_pred_distri, s_pred_scores = (
+            s_pred_distri.permute(0, 2, 1).contiguous(),
+            s_pred_scores.permute(0, 2, 1).contiguous(),
+        )
+        t_pred_distri, t_pred_scores = (
+            t_pred_distri.permute(0, 2, 1).contiguous(),
+            t_pred_scores.permute(0, 2, 1).contiguous(),
+        )
 
         dtype = s_pred_scores.dtype
         batch_size = s_pred_scores.shape[0]
@@ -485,22 +458,34 @@ class BCKD(nn.Module):
         anchor_points, stride_tensor = make_anchors(s_p, self.stride, 0.5)
 
         # targets
-        targets = torch.cat((batch['batch_idx'].view(-1, 1), batch['cls'].view(-1, 1), batch['bboxes']), 1)
+        targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
         targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
-        s_pred_bboxes, t_pred_bboxes = self.bbox_decode(anchor_points, s_pred_distri), self.bbox_decode(anchor_points,
-                                                                                                        t_pred_distri)
+        s_pred_bboxes, t_pred_bboxes = (
+            self.bbox_decode(anchor_points, s_pred_distri),
+            self.bbox_decode(anchor_points, t_pred_distri),
+        )
 
         if o2o:
             _, target_bboxes, target_scores, fg_mask, _ = self.assigner_o2o(
-                s_pred_scores.detach().sigmoid(), (s_pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-                anchor_points * stride_tensor, gt_labels, gt_bboxes, mask_gt)
+                s_pred_scores.detach().sigmoid(),
+                (s_pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+                anchor_points * stride_tensor,
+                gt_labels,
+                gt_bboxes,
+                mask_gt,
+            )
         else:
-            _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
-                s_pred_scores.detach().sigmoid(), (s_pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
-                anchor_points * stride_tensor, gt_labels, gt_bboxes, mask_gt)
+            _, _target_bboxes, target_scores, fg_mask, _ = self.assigner(
+                s_pred_scores.detach().sigmoid(),
+                (s_pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+                anchor_points * stride_tensor,
+                gt_labels,
+                gt_bboxes,
+                mask_gt,
+            )
         target_scores_sum = max(target_scores.sum(), 1)
 
         weight_targets1 = s_pred_scores.detach().sigmoid()
@@ -508,15 +493,19 @@ class BCKD(nn.Module):
         weight_targets3 = weight_targets2 - weight_targets1
         total_weight_targets = weight_targets3.abs().pow(1.0).max(dim=-1)[0] * fg_mask
 
-        loss_score_kd = ((1 - bbox_iou(s_pred_bboxes, t_pred_bboxes.detach(), xywh=False,
-                                       CIoU=True).squeeze()) * total_weight_targets).sum() / target_scores_sum
+        loss_score_kd = (
+            (1 - bbox_iou(s_pred_bboxes, t_pred_bboxes.detach(), xywh=False, CIoU=True).squeeze())
+            * total_weight_targets
+        ).sum() / target_scores_sum
         loss_score_kd *= self.loss_score_kd_ratio
 
         fg_mask = fg_mask.bool()
         weight_targets = s_pred_scores.detach().sigmoid() + 1e-4
         weight_targets = weight_targets.max(dim=-1)[0][fg_mask] + 1e-4
-        s_pred_corners, t_pred_corners = s_pred_distri[fg_mask].reshape(-1, self.reg_max), t_pred_distri[
-            fg_mask].reshape(-1, self.reg_max)
+        s_pred_corners, t_pred_corners = (
+            s_pred_distri[fg_mask].reshape(-1, self.reg_max),
+            t_pred_distri[fg_mask].reshape(-1, self.reg_max),
+        )
         loss_ld = self.loss_ld(s_pred_corners, t_pred_corners, weight_targets[:, None].expand(-1, 4).reshape(-1), 4.0)
         loss_kd = self.loss_kd(s_pred_scores, t_pred_scores, fg_mask, target_scores_sum)
 
@@ -525,32 +514,29 @@ class BCKD(nn.Module):
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class FeatureLoss(nn.Module):
-    def __init__(self,
-                 channels_s,
-                 channels_t,
-                 distiller='cwd'):
-        super(FeatureLoss, self).__init__()
+    def __init__(self, channels_s, channels_t, distiller="cwd"):
+        super().__init__()
 
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.align_module = nn.ModuleList([
-            nn.Conv2d(channel, tea_channel, kernel_size=1, stride=1,
-                      padding=0).to(device) if channel != tea_channel else nn.Identity()
-            for channel, tea_channel in zip(channels_s, channels_t)
-        ])
-        self.norm = [
-            nn.BatchNorm2d(tea_channel, affine=False).to(device)
-            for tea_channel in channels_t
-        ]
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.align_module = nn.ModuleList(
+            [
+                nn.Conv2d(channel, tea_channel, kernel_size=1, stride=1, padding=0).to(device)
+                if channel != tea_channel
+                else nn.Identity()
+                for channel, tea_channel in zip(channels_s, channels_t)
+            ]
+        )
+        self.norm = [nn.BatchNorm2d(tea_channel, affine=False).to(device) for tea_channel in channels_t]
 
-        if (distiller == 'mimic'):
+        if distiller == "mimic":
             self.feature_loss = MimicLoss(channels_s, channels_t)
-        elif (distiller == 'mgd'):
+        elif distiller == "mgd":
             self.feature_loss = MGDLoss(channels_s, channels_t)
-        elif (distiller == 'cwd'):
+        elif distiller == "cwd":
             self.feature_loss = CWDLoss(channels_s, channels_t)
-        elif (distiller == 'chsim'):
+        elif distiller == "chsim":
             self.feature_loss = ChSimLoss(channels_s, channels_t)
-        elif (distiller == 'sp'):
+        elif distiller == "sp":
             self.feature_loss = SPKDLoss(channels_s, channels_t)
         else:
             raise NotImplementedError
@@ -574,18 +560,18 @@ class FeatureLoss(nn.Module):
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class MimicLoss(nn.Module):
     def __init__(self, channels_s, channels_t):
-        super(MimicLoss, self).__init__()
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        super().__init__()
+        "cuda" if torch.cuda.is_available() else "cpu"
         self.mse = nn.MSELoss()
 
     def forward(self, y_s, y_t):
         """Forward computation.
+
         Args:
-            y_s (list): The student model prediction with
-                shape (N, C, H, W) in list.
-            y_t (list): The teacher model prediction with
-                shape (N, C, H, W) in list.
-        Return:
+            y_s (list): The student model prediction with shape (N, C, H, W) in list.
+            y_t (list): The teacher model prediction with shape (N, C, H, W) in list.
+
+        Returns:
             torch.Tensor: The calculated loss value of all stages.
         """
         assert len(y_s) == len(y_t)
@@ -599,32 +585,31 @@ class MimicLoss(nn.Module):
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class MGDLoss(nn.Module):
-    def __init__(self,
-                 channels_s,
-                 channels_t,
-                 alpha_mgd=0.00002,
-                 lambda_mgd=0.65):
-        super(MGDLoss, self).__init__()
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    def __init__(self, channels_s, channels_t, alpha_mgd=0.00002, lambda_mgd=0.65):
+        super().__init__()
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         self.alpha_mgd = alpha_mgd
         self.lambda_mgd = lambda_mgd
 
-        self.generation = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(channel, channel, kernel_size=3, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(channel, channel, kernel_size=3,
-                          padding=1)).to(device) for channel in channels_t
-        ])
+        self.generation = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(channel, channel, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(channel, channel, kernel_size=3, padding=1),
+                ).to(device)
+                for channel in channels_t
+            ]
+        )
 
     def forward(self, y_s, y_t):
         """Forward computation.
+
         Args:
-            y_s (list): The student model prediction with
-                shape (N, C, H, W) in list.
-            y_t (list): The teacher model prediction with
-                shape (N, C, H, W) in list.
-        Return:
+            y_s (list): The student model prediction with shape (N, C, H, W) in list.
+            y_t (list): The teacher model prediction with shape (N, C, H, W) in list.
+
+        Returns:
             torch.Tensor: The calculated loss value of all stages.
         """
         assert len(y_s) == len(y_t)
@@ -636,8 +621,8 @@ class MGDLoss(nn.Module):
         return loss
 
     def get_dis_loss(self, preds_S, preds_T, idx):
-        loss_mse = nn.MSELoss(reduction='sum')
-        N, C, H, W = preds_T.shape
+        loss_mse = nn.MSELoss(reduction="sum")
+        N, _C, H, W = preds_T.shape
 
         device = preds_S.device
         mat = torch.rand((N, 1, H, W)).to(device)
@@ -653,22 +638,21 @@ class MGDLoss(nn.Module):
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class CWDLoss(nn.Module):
-    """PyTorch version of `Channel-wise Distillation for Semantic Segmentation.
-    <https://arxiv.org/abs/2011.13256>`_.
+    """PyTorch version of `Channel-wise Distillation for Semantic Segmentation. <https://arxiv.org/abs/2011.13256>`_.
     """
 
     def __init__(self, channels_s, channels_t, tau=1.0):
-        super(CWDLoss, self).__init__()
+        super().__init__()
         self.tau = tau
 
     def forward(self, y_s, y_t):
         """Forward computation.
+
         Args:
-            y_s (list): The student model prediction with
-                shape (N, C, H, W) in list.
-            y_t (list): The teacher model prediction with
-                shape (N, C, H, W) in list.
-        Return:
+            y_s (list): The student model prediction with shape (N, C, H, W) in list.
+            y_t (list): The teacher model prediction with shape (N, C, H, W) in list.
+
+        Returns:
             torch.Tensor: The calculated loss value of all stages.
         """
         assert len(y_s) == len(y_t)
@@ -678,14 +662,13 @@ class CWDLoss(nn.Module):
             assert s.shape == t.shape
             N, C, H, W = s.shape
             # normalize in channel diemension
-            softmax_pred_T = F.softmax(t.view(-1, W * H) / self.tau,
-                                       dim=1)  # [N*C, H*W]
+            softmax_pred_T = F.softmax(t.view(-1, W * H) / self.tau, dim=1)  # [N*C, H*W]
 
             logsoftmax = torch.nn.LogSoftmax(dim=1)
             cost = torch.sum(
-                softmax_pred_T * logsoftmax(t.view(-1, W * H) / self.tau) -
-                softmax_pred_T * logsoftmax(s.view(-1, W * H) / self.tau)) * (
-                           self.tau ** 2)
+                softmax_pred_T * logsoftmax(t.view(-1, W * H) / self.tau)
+                - softmax_pred_T * logsoftmax(s.view(-1, W * H) / self.tau)
+            ) * (self.tau**2)
             # cost = torch.sum(-softmax_pred_T * logsoftmax(s.view(-1, W * H)/self.tau)) * (self.tau ** 2)
 
             losses.append(cost / (C * N))
@@ -696,10 +679,9 @@ class CWDLoss(nn.Module):
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class ChSimLoss(nn.Module):
-    '''
-    A loss module for Inter-Channel Correlation for Knowledge Distillation (ICKD).
-    https://openaccess.thecvf.com/content/ICCV2021/html/Liu_Exploring_Inter-Channel_Correlation_for_Diversity-Preserved_Knowledge_Distillation_ICCV_2021_paper.html
-    '''
+    """A loss module for Inter-Channel Correlation for Knowledge Distillation (ICKD).
+    https://openaccess.thecvf.com/content/ICCV2021/html/Liu_Exploring_Inter-Channel_Correlation_for_Diversity-Preserved_Knowledge_Distillation_ICCV_2021_paper.html.
+    """
 
     def __init__(self, channels_s, channels_t) -> None:
         super().__init__()
@@ -732,13 +714,11 @@ class ChSimLoss(nn.Module):
 
 # ------------------------------BiliBili 魔鬼面具up主------------------------------
 class SPKDLoss(nn.Module):
-    '''
-    Similarity-Preserving Knowledge Distillation
-    https://arxiv.org/pdf/1907.09682.pdf
-    '''
+    """Similarity-Preserving Knowledge Distillation https://arxiv.org/pdf/1907.09682.pdf.
+    """
 
     def __init__(self, channels_s, channels_t):
-        super(SPKDLoss, self).__init__()
+        super().__init__()
 
     def matmul_and_normalize(self, z):
         z = torch.flatten(z, 1)
