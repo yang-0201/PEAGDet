@@ -1,10 +1,7 @@
-import math
-import sys
-
-import torch.nn.functional as F
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import init
 
 
@@ -119,12 +116,13 @@ class SelfAttention(nn.Module):
                     init.constant_(m.bias, 0)
 
     def forward(self, x, attention_mask=None, attention_weights=None):
-        """
-        Computes Self-Attention
+        """Computes Self-Attention.
+
         Args:
-            x (tensor): input (token) dim:(b_s, nx, c),
-        Return:
-            output (tensor): dim:(b_s, nx, c)
+            x (tensor): input (token) dim:(b_s, nx, c),.
+
+        Returns:
+            output (tensor): dim:(b_s, nx, c).
         """
         # N/A 双分支：x[0] 为 N 分支特征，x[1] 为 A 分支特征
         N_fea_flat = x[0]
@@ -233,9 +231,7 @@ class CrossAttention(nn.Module):
                     init.constant_(m.bias, 0)
 
     def forward(self, x, attention_mask=None, attention_weights=None):
-        """
-        Cross-Attention: N 分支使用 A 的键值，A 分支使用 N 的键值
-        """
+        """Cross-Attention: N 分支使用 A 的键值，A 分支使用 N 的键值."""
         N_fea_flat = x[0]
         A_fea_flat = x[1]
         b_s, nq = N_fea_flat.shape[:2]
@@ -349,7 +345,7 @@ class AdaptivePool2d(nn.Module):
         assert self.pool_type in ["avg", "max"], "pool_type must be 'avg' or 'max'"
 
     def forward(self, x):
-        bs, c, input_h, input_w = x.shape
+        _bs, _c, input_h, input_w = x.shape
 
         # 情况1：输入尺寸 ≤ 输出尺寸 → 直接返回或上采样
         if input_h <= self.output_h or input_w <= self.output_w:
@@ -417,7 +413,9 @@ class PCAF(nn.Module):
         # cross transformer
         self.crosstransformer = nn.Sequential(
             *[
-                CrossTransformerBlock(d_model, d_k, d_v, h, block_exp, attn_pdrop, resid_pdrop, vit_layer=vit_layer + layer)
+                CrossTransformerBlock(
+                    d_model, d_k, d_v, h, block_exp, attn_pdrop, resid_pdrop, vit_layer=vit_layer + layer
+                )
                 for layer in range(n_layer)
             ]
         )
@@ -446,7 +444,7 @@ class PCAF(nn.Module):
         A_fea = self.conv1x1_in2(x[1])
 
         assert N_fea.shape[0] == A_fea.shape[0]
-        bs, c, h, w = N_fea.shape
+        bs, _c, h, w = N_fea.shape
 
         # 自适应池化 + 加权融合（avg/max）
         new_N_fea = self.vis_coefficient(self.avgpool(N_fea), self.maxpool(N_fea))
@@ -482,34 +480,40 @@ class PCAF(nn.Module):
 
 class Feature_Pool(nn.Module):
     def __init__(self, dim, ratio=2):
-        super(Feature_Pool, self).__init__()
+        super().__init__()
         self.gap_pool = nn.AdaptiveAvgPool2d(1)
         self.down = nn.Linear(dim, dim * ratio)
         self.act = nn.GELU()
         self.up = nn.Linear(dim * ratio, dim)
+
     def forward(self, x):
         b, c, _, _ = x.size()
-        y = self.up(self.act(self.down(self.gap_pool(x).permute(0,2,3,1)))).permute(0,3,1,2).view(b,c)
+        y = self.up(self.act(self.down(self.gap_pool(x).permute(0, 2, 3, 1)))).permute(0, 3, 1, 2).view(b, c)
         return y
+
 
 class Channel_Attention(nn.Module):
     def __init__(self, dim, ratio=16):
-        super(Channel_Attention, self).__init__()
+        super().__init__()
         self.gap_pool = nn.AdaptiveMaxPool2d(1)
-        self.down = nn.Linear(dim, dim//ratio)
+        self.down = nn.Linear(dim, dim // ratio)
         self.act = nn.GELU()
-        self.up = nn.Linear(dim//ratio, dim)
+        self.up = nn.Linear(dim // ratio, dim)
+
     def forward(self, x):
-        max_out = self.up(self.act(self.down(self.gap_pool(x).permute(0,2,3,1)))).permute(0,3,1,2)
+        max_out = self.up(self.act(self.down(self.gap_pool(x).permute(0, 2, 3, 1)))).permute(0, 3, 1, 2)
         return max_out
+
 
 class Spatial_Attention(nn.Module):
     def __init__(self, dim):
-        super(Spatial_Attention, self).__init__()
-        self.conv1 = nn.Conv2d(dim, 1, kernel_size=1,bias=True)
+        super().__init__()
+        self.conv1 = nn.Conv2d(dim, 1, kernel_size=1, bias=True)
+
     def forward(self, x):
         x1 = self.conv1(x)
         return x1
+
 
 class DPAG(nn.Module):
     def __init__(self, dim):
@@ -518,13 +522,13 @@ class DPAG(nn.Module):
         self.dwconv = nn.Conv2d(dim * 2, dim * 2, kernel_size=7, padding=3, groups=dim)
         self.ecse = Channel_Attention(dim * 2)
         self.ccse = Channel_Attention(dim)  # 保留以兼容原结构（此处未使用）
-        self.sse_N = Spatial_Attention(dim) # 原 sse_r
-        self.sse_A = Spatial_Attention(dim) # 原 sse_t
+        self.sse_N = Spatial_Attention(dim)  # 原 sse_r
+        self.sse_A = Spatial_Attention(dim)  # 原 sse_t
 
     def forward(self, x1, x2):
         # 统一命名：N（例如 Non-contrast）与 A（例如 Arterial）
         N, A = x1, x2
-        b, c, h, w = N.size()
+        b, c, _h, _w = N.size()
 
         # 全局/通道聚合 + L2 归一化
         N_y = self.mlp_pool(N)  # 期望形状 [b, c]
@@ -533,8 +537,8 @@ class DPAG(nn.Module):
         A_y = A_y / (A_y.norm(dim=1, keepdim=True) + 1e-6)
 
         # 构造通道间相似度（逐通道对齐得到对角）
-        N_y = N_y.view(b, c, 1)   # [b, c, 1]
-        A_y = A_y.view(b, 1, c)   # [b, 1, c]
+        N_y = N_y.view(b, c, 1)  # [b, c, 1]
+        A_y = A_y.view(b, 1, c)  # [b, 1, c]
         logits_per = c * (N_y @ A_y)  # [b, c, c]
         cross_gate = torch.diagonal(torch.sigmoid(logits_per), dim1=-2, dim2=-1).view(b, c, 1, 1)  # [b, c, 1, 1]
         add_gate = 1.0 - cross_gate
@@ -546,9 +550,9 @@ class DPAG(nn.Module):
         New_A_c = A * add_gate
 
         # 交换路径融合：DWConv + 通道注意力
-        x_cat_e = torch.cat((New_N_e, New_A_e), dim=1)              # [b, 2c, h, w]
-        fuse_gate_e = torch.sigmoid(self.ecse(self.dwconv(x_cat_e))) # 期望 [b, 2c, *, *] 或 [b, 2c, 1, 1]
-        N_gate_e, A_gate_e = fuse_gate_e[:, :c, ...], fuse_gate_e[:, c:2*c, ...]
+        x_cat_e = torch.cat((New_N_e, New_A_e), dim=1)  # [b, 2c, h, w]
+        fuse_gate_e = torch.sigmoid(self.ecse(self.dwconv(x_cat_e)))  # 期望 [b, 2c, *, *] 或 [b, 2c, 1, 1]
+        N_gate_e, A_gate_e = fuse_gate_e[:, :c, ...], fuse_gate_e[:, c : 2 * c, ...]
 
         # 门控融合：交换 + 补充
         New_N = New_N_e * N_gate_e + New_N_c
@@ -613,7 +617,9 @@ class PCAF_DPAG(nn.Module):
         # cross transformer
         self.crosstransformer = nn.Sequential(
             *[
-                CrossTransformerBlock(d_model, d_k, d_v, h, block_exp, attn_pdrop, resid_pdrop, vit_layer=vit_layer + layer)
+                CrossTransformerBlock(
+                    d_model, d_k, d_v, h, block_exp, attn_pdrop, resid_pdrop, vit_layer=vit_layer + layer
+                )
                 for layer in range(n_layer)
             ]
         )
@@ -647,7 +653,7 @@ class PCAF_DPAG(nn.Module):
         N_fea, A_fea = self.dpag(N_fea, A_fea)
 
         assert N_fea.shape[0] == A_fea.shape[0]
-        bs, c, h, w = N_fea.shape
+        bs, _c, h, w = N_fea.shape
 
         # 自适应池化 + 加权融合（avg/max）
         new_N_fea = self.vis_coefficient(self.avgpool(N_fea), self.maxpool(N_fea))
@@ -674,7 +680,6 @@ class PCAF_DPAG(nn.Module):
         else:
             A_fea_CFE = F.interpolate(A_fea_CFE, size=(h, w), mode="bilinear")
         new_A_fea = A_fea_CFE + A_fea
-
 
         # 融合两路并回到 d_model
         new_fea = self.concat([new_N_fea, new_A_fea])
