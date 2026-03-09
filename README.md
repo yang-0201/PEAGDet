@@ -15,18 +15,21 @@ Single GPU training
 ```python
 # train.py
 from ultralytics import YOLOv10
-if __name__ == '__main__':
-    model = YOLOv10('PEAG-Det.yaml')
-    model.train(data="dual_yixian.yaml", epochs=300,batch=64,imgsz=640 ,device='0', workers=4,val_period= 1, scale=0.9)
 
+if __name__ == "__main__":
+    model = YOLOv10("PEAG-Det.yaml")
+    model.train(
+        data="dual_yixian.yaml", epochs=300, batch=64, imgsz=640, device="0", workers=4, val_period=1, scale=0.9
+    )
 ```
 ## Val
 ```python
 # val.py
 from ultralytics import YOLOv10
-if __name__ == '__main__':
-    model = YOLOv10('best.pt')
-    model.val(data='dual_yixian.yaml', device=0,split='val', batch=8)
+
+if __name__ == "__main__":
+    model = YOLOv10("best.pt")
+    model.val(data="dual_yixian.yaml", device=0, split="val", batch=8)
 ```
 ## Model Architecture
 ```python
@@ -109,8 +112,6 @@ head:
   - [-1, 1, RepHEA, [512, 3, 1, 3, 9]] # 35
 
   - [[44, 49, 53], 1, Detect, [nc]] # Detect(P3, P4, P5)
-
-
 ```
 ## Model  Figures
 <div align="center">
